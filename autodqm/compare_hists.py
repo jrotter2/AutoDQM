@@ -53,11 +53,11 @@ def process(config_dir, subsystem,
                     continue
 
                 # Make pdf
-                results.canvas.write_image(png_path)
+                results.canvas.write_image(pdf_path)
 
                 # Make png
-#                subprocess.Popen(
-#                    ['convert', '-density', '50', '-trim', '-fuzz', '1%', pdf_path, png_path])
+                subprocess.Popen(
+                    ['convert', '-density', '50', '-trim', '-fuzz', '1%', pdf_path, png_path])
 
                 # Make json
                 info = {
