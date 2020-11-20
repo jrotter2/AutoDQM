@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import ROOT
+import uproot
+import numpy
+import scipy.stats
 from autodqm.plugin_results import PluginResults
-
+import plotly.graph_objects as go
 
 def comparators():
     return {
@@ -20,92 +22,53 @@ def ks(histpair, ks_cut=0.09, min_entries=100000, **kwargs):
     ref_hist = histpair.ref_hist
 
     # Check that the hists are histograms
-    if not data_hist.InheritsFrom('TH1') or not ref_hist.InheritsFrom('TH1'):
-        return None
-
     # Check that the hists are 1 dimensional
-    if data_hist.GetDimension() != 1 or ref_hist.GetDimension() != 1:
+    if "1" not in str(type(data_hist)) or "1" not in str(type(ref_hist)):
         return None
 
     # Normalize data_hist
-    if data_hist.GetEntries() > 0:
-        data_hist.Scale(ref_hist.GetEntries() / data_hist.GetEntries())
+    data_hist_norm = numpy.copy(data_hist.allvalues)
+    ref_hist_norm = numpy.copy(ref_hist.allvalues)
+    if data_hist._fEntries > 0:
+        data_hist_norm = data_hist_norm * (ref_hist._fEntries / data_hist._fEntries)
 
     # Reject empty histograms
-    is_good = data_hist.GetEntries() != 0 and data_hist.GetEntries() >= min_entries
+    is_good = data_hist._fEntries != 0 and data_hist._fEntries >= min_entries
 
-    ks = data_hist.KolmogorovTest(ref_hist, "M")
+    ks = scipy.stats.kstest(ref_hist_norm, data_hist_norm)[0]
 
     is_outlier = is_good and ks > ks_cut
 
-    canv, artifacts = draw_same(
-        data_hist, histpair.data_run, ref_hist, histpair.ref_run)
+
+    bins = data_hist.alledges[:-1]
+    if bins[0] < -999:
+        bins[0]=2*bins[1]-bins[2]
+
+    c = go.Figure()
+    c.add_trace(go.Bar(name="data:"+str(histpair.data_run), x=bins, y=data_hist_norm, marker_color='white', marker=dict(line=dict(width=1,color='red'))))
+    c.add_trace(go.Bar(name="ref:"+str(histpair.ref_run), x=bins, y=ref_hist_norm, marker_color='rgb(204, 188, 172)', opacity=.9))
+    c['layout'].update(bargap=0)
+    c['layout'].update(barmode='overlay')
+    c['layout'].update(plot_bgcolor='white')
+    c.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+    c.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+    c.update_layout(
+        title=histpair.data_name + " KS Test " + histpair.data_run + " | " + histpair.ref_run,
+        xaxis_title= data_hist._fXaxis._fTitle.decode('utf8'),
+        yaxis_title= data_hist._fYaxis._fTitle.decode('utf8')
+    )
+    data_text = "ref:"+str(histpair.ref_run)
+    ref_text = "data:"+str(histpair.data_run)
+    artifacts = [data_hist_norm, ref_hist_norm, data_text, ref_text]
 
     info = {
-        'Data_Entries': data_hist.GetEntries(),
-        'Ref_Entries': ref_hist.GetEntries(),
+        'Data_Entries': data_hist._fEntries,
+        'Ref_Entries': ref_hist._fEntries,
         'KS_Val': ks
     }
 
     return PluginResults(
-        canv,
+        c,
         show=is_outlier,
         info=info,
         artifacts=artifacts)
-
-
-def draw_same(data_hist, data_run, ref_hist, ref_run):
-    # Set up canvas
-    c = ROOT.TCanvas('c', 'c')
-    data_hist = data_hist.Clone()
-    ref_hist = ref_hist.Clone()
-
-    # Ensure plot accounts for maximum value
-    ref_hist.SetMaximum(
-        max(data_hist.GetMaximum(), ref_hist.GetMaximum()) * 1.1)
-
-    ROOT.gStyle.SetOptStat(1)
-    ref_hist.SetStats(True)
-    data_hist.SetStats(True)
-
-    # Set hist style
-    ref_hist.SetLineColor(28)
-    ref_hist.SetFillColor(20)
-    ref_hist.SetLineWidth(1)
-    data_hist.SetLineColor(ROOT.kRed)
-    data_hist.SetLineWidth(1)
-
-    # Name histograms
-    ref_hist.SetName("Reference")
-    data_hist.SetName("Data")
-
-    # Plot hist
-    ref_hist.Draw()
-    data_hist.Draw("sames hist e")
-    c.Update()
-
-    # Modify stats boxes
-    r_stats = ref_hist.FindObject("stats")
-    f_stats = data_hist.FindObject("stats")
-
-    r_stats.SetY1NDC(0.15)
-    r_stats.SetY2NDC(0.30)
-    r_stats.SetTextColor(28)
-    r_stats.Draw()
-
-    f_stats.SetY1NDC(0.35)
-    f_stats.SetY2NDC(0.50)
-    f_stats.SetTextColor(ROOT.kRed)
-    f_stats.Draw()
-
-    # Text box
-    data_text = ROOT.TLatex(.52, .91, "#scale[0.6]{Data: " + data_run + "}")
-    ref_text = ROOT.TLatex(.72, .91, "#scale[0.6]{Ref: " + ref_run + "}")
-    data_text.SetNDC(ROOT.kTRUE)
-    ref_text.SetNDC(ROOT.kTRUE)
-    data_text.Draw()
-    ref_text.Draw()
-
-    c.Update()
-    artifacts = [data_hist, ref_hist, data_text, ref_text]
-    return c, artifacts

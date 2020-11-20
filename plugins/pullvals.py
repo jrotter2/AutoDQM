@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import ROOT
+import uproot
+import numpy
+from scipy.stats import chi2
 from autodqm.plugin_results import PluginResults
-
+import scipy
+import plotly.graph_objects as go
 
 def comparators():
     return {
@@ -18,53 +21,52 @@ def pullvals(histpair,
     ref_hist = histpair.ref_hist
 
     # Check that the hists are histograms
-    if not data_hist.InheritsFrom('TH1') or not ref_hist.InheritsFrom('TH1'):
-        return None
-
     # Check that the hists are 2 dimensional
-    if data_hist.GetDimension() != 2 or ref_hist.GetDimension() != 2:
+    if not "2" in str(type(data_hist)) or not "2" in str(type(ref_hist)):
         return None
-
-    ROOT.gStyle.SetOptStat(0)
-    ROOT.gStyle.SetPalette(ROOT.kLightTemperature)
-    ROOT.gStyle.SetNumberContours(255)
-
-    # Get empty clone of reference histogram for pull hist
-    if ref_hist.InheritsFrom('TProfile2D'):
-        pull_hist = ref_hist.ProjectionXY("pull_hist")
+    # Extract values from TH2F or TProfile2D Format
+    data_hist_norm = None
+    ref_hist_norm = None
+    if "TProfile" in str(type(data_hist)):
+        data_hist_norm = numpy.reshape(data_hist._fBinEntries, (data_hist.xnumbins+2, data_hist.ynumbins+2))
+        ref_hist_norm = numpy.reshape(ref_hist._fBinEntries, (data_hist.xnumbins+2, data_hist.ynumbins+2))
     else:
-        pull_hist = ref_hist.Clone("pull_hist")
-    pull_hist.Reset()
+        data_hist_norm = numpy.copy(data_hist.values)
+        ref_hist_norm = numpy.copy(ref_hist.values)
+
+    # Clone data_hist array to create pull_hist array to be filled later
+    pull_hist = numpy.copy(data_hist_norm)
+
 
     # Reject empty histograms
-    is_good = data_hist.GetEntries() != 0 and data_hist.GetEntries() >= min_entries
+    is_good = data_hist._fEntries != 0 and data_hist._fEntries >= min_entries
 
     # Normalize data_hist
     if norm_type == "row":
-        normalize_rows(data_hist, ref_hist)
+        data_hist_norm = normalize_rows(data_hist_norm, ref_hist_norm)
     else:
-        if data_hist.GetEntries() > 0:
-            data_hist.Scale(ref_hist.GetSumOfWeights() / data_hist.GetSumOfWeights())
+        if data_hist._fEntries > 0:
+            data_hist_norm = data_hist_norm * ref_hist._fEntries / data_hist._fEntries
+
+    data_hist_errs = numpy.nan_to_num(abs(numpy.array(scipy.stats.chi2.interval(0.6827, 2 * data_hist_norm)) / 2 - 1 - data_hist_norm))
+    ref_hist_errs = numpy.nan_to_num(abs(numpy.array(scipy.stats.chi2.interval(0.6827, 2 * ref_hist_norm)) / 2 - 1 - ref_hist_norm))
 
     max_pull = 0
     nBins = 0
     chi2 = 0
-    for x in range(1, ref_hist.GetNbinsX() + 1):
-        for y in range(1, ref_hist.GetNbinsY() + 1):
+    for x in range(0, data_hist_norm.shape[0]):
+        for y in range(0, data_hist_norm.shape[1]):
 
             # Bin 1 data
-            bin1 = data_hist.GetBinContent(x, y)
+            bin1 = data_hist_norm[x, y]
 
             # Bin 2 data
-            bin2 = ref_hist.GetBinContent(x, y)
+            bin2 = ref_hist_norm[x, y]
 
-            # TEMPERARY - Getting Symmetric Error - Need to update with >Proper Poisson error 
-            if ref_hist.InheritsFrom('TProfile2D'):
-                bin1err = data_hist.GetBinError(x, y)
-                bin2err = ref_hist.GetBinError(x, y)
-            else:
-                bin1err, bin2err = bin1**(.5), bin2**(.5)
-
+            # Getting Proper Poisson error 
+            bin1err, bin2err = data_hist_errs[0, x, y], ref_hist_errs[1, x, y]
+            if bin1 < bin2:
+                bin1err, bin2err = data_hist_errs[1, x, y], ref_hist_errs[0, x, y]
             # Count bins for chi2 calculation
             nBins += 1
 
@@ -88,8 +90,8 @@ def pullvals(histpair,
             if bin1 == bin2 == 0:
                 fill_val = -999
 
-            # Fill Pull Histogram
-            pull_hist.SetBinContent(x, y, fill_val)
+            # Fill Pull Histogram            
+            pull_hist[x, y] = fill_val
 
     # Compute chi2
     chi2 = (chi2 / nBins)
@@ -97,35 +99,46 @@ def pullvals(histpair,
     is_outlier = is_good and (chi2 > chi2_cut or abs(max_pull) > pull_cut)
 
     # Set up canvas
-    c = ROOT.TCanvas('c', 'Pull')
+    pull_hist = numpy.where(pull_hist < -2*pull_cap, None, pull_hist)
+    colors = ['rgb(26, 42, 198)', 'rgb(118, 167, 231)', 'rgb(215, 226, 194)', 'rgb(212, 190, 109)', 'rgb(188, 76, 38)']
 
-    # Plot pull hist
-    pull_hist.GetZaxis().SetRangeUser(-(pull_cap), pull_cap)
-    pull_hist.SetTitle(pull_hist.GetTitle() + " Pull Values")
-    pull_hist.Draw("colz")
+    xLabels = None
+    yLabels = None
+    c = None
+    if data_hist._fXaxis._fLabels:
+       xLabels = [str(x) for x in data_hist._fXaxis._fLabels]
+    else:
+       xLabels = [str(data_hist.xlow + x*(data_hist.xhigh-data_hist.xlow)/pull_hist.shape[1]) for x in range(0,pull_hist.shape[0])]
+    if data_hist._fYaxis._fLabels:
+       yLabels = [str(x) for x in data_hist._fYaxis._fLabels]
+    else:
+       yLabels = [str(data_hist.ylow + x*(data_hist.yhigh-data_hist.ylow)/pull_hist.shape[1]) for x in range(0,pull_hist.shape[1])]
 
-    # Text box
-    data_text = ROOT.TLatex(.52, .91,
-                            "#scale[0.6]{Data: " + histpair.data_run + "}")
-    ref_text = ROOT.TLatex(.72, .91,
-                           "#scale[0.6]{Ref: " + histpair.ref_run + "}")
-    data_text.SetNDC(ROOT.kTRUE)
-    ref_text.SetNDC(ROOT.kTRUE)
-    data_text.Draw()
-    ref_text.Draw()
+    if pull_hist.shape[1] != len(xLabels):
+         pull_hist = numpy.transpose(pull_hist)
+
+    c  = go.Figure(data=go.Heatmap(z=pull_hist, zmin=-pull_cap, zmax=pull_cap, colorscale=colors,x=xLabels, y=yLabels))
+    c['layout'].update(plot_bgcolor='white')
+    c.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+    c.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+    c.update_layout(
+        title=histpair.data_name + " Pull Values",
+        xaxis_title= data_hist._fXaxis._fTitle.decode('utf8'),
+        yaxis_title= data_hist._fYaxis._fTitle.decode('utf8')
+    )
 
     info = {
         'Chi_Squared': chi2,
         'Max_Pull_Val': max_pull,
-        'Data_Entries': data_hist.GetEntries(),
-        'Ref_Entries': ref_hist.GetEntries(),
+        'Data_Entries': data_hist._fEntries,
+        'Ref_Entries': ref_hist._fEntries,
     }
 
-    artifacts = [pull_hist, data_text, ref_text]
+    artifacts = [pull_hist, str(data_hist._fEntries), str(ref_hist._fEntries)]
 
     return PluginResults(
         c,
-        show=is_outlier,
+        show=bool(is_outlier),
         info=info,
         artifacts=artifacts)
 
@@ -137,21 +150,20 @@ def pull(bin1, binerr1, bin2, binerr2):
     '''
     return (bin1 - bin2) / ((binerr1**2 + binerr2**2)**0.5)
 
+def normalize_rows(data_hist_norm, ref_hist_norm):
 
-def normalize_rows(data_hist, ref_hist):
-
-    for y in range(1, ref_hist.GetNbinsY() + 1):
+    for y in range(0, ref_hist_norm.shape[1]):
 
         # Stores sum of row elements
         rrow = 0
         frow = 0
 
         # Sum over row elements
-        for x in range(1, ref_hist.GetNbinsX() + 1):
+        for x in range(0, ref_hist_norm.shape[0]):
 
             # Bin data
-            rbin = ref_hist.GetBinContent(x, y)
-            fbin = data_hist.GetBinContent(x, y)
+            rbin = ref_hist_norm[x,y]
+            fbin = data_hist_norm[x, y]
 
             rrow += rbin
             frow += fbin
@@ -169,13 +181,12 @@ def normalize_rows(data_hist, ref_hist):
             sf = 1
 
         # Normalization
-        for x in range(1, data_hist.GetNbinsX() + 1):
+        for x in range(0, ref_hist_norm.shape[0]):
             # Bin data
-            fbin = data_hist.GetBinContent(x, y)
-            fbin_err = data_hist.GetBinError(x, y)
+            fbin = data_hist_norm[x, y]
+            fbin_err = (fbin)**(.5)
 
             # Normalize bin
-            data_hist.SetBinContent(x, y, (fbin * sf))
-            data_hist.SetBinError(x, y, (fbin_err * sf))
+            data_hist_norm[x, y] = (fbin * sf)
+    return data_hist_norm
 
-    return
