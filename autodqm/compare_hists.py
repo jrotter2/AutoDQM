@@ -6,7 +6,6 @@ import sys
 import json
 import subprocess
 import uproot
-import matplotlib
 from autodqm import cfg
 from autodqm.histpair import HistPair
 import plotly
