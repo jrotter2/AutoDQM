@@ -27,9 +27,11 @@ def pullvals(histpair,
     # Extract values from TH2F or TProfile2D Format
     data_hist_norm = None
     ref_hist_norm = None
+    #raise Exception(projectionXY(data_hist))
+    #raise Exception(data_hist.xnumbins, data_hist._fBinEntries)
     if "TProfile" in str(type(data_hist)):
-        data_hist_norm = numpy.reshape(data_hist._fBinEntries, (data_hist.xnumbins+2, data_hist.ynumbins+2))
-        ref_hist_norm = numpy.reshape(ref_hist._fBinEntries, (data_hist.xnumbins+2, data_hist.ynumbins+2))
+        data_hist_norm = projectionXY(data_hist)
+        ref_hist_norm = projectionXY(ref_hist)
     else:
         data_hist_norm = numpy.copy(data_hist.values)
         ref_hist_norm = numpy.copy(ref_hist.values)
@@ -114,17 +116,30 @@ def pullvals(histpair,
     else:
        yLabels = [str(data_hist.ylow + x*(data_hist.yhigh-data_hist.ylow)/pull_hist.shape[1]) for x in range(0,pull_hist.shape[1])]
 
-    if pull_hist.shape[1] != len(xLabels):
-         pull_hist = numpy.transpose(pull_hist)
+#    if pull_hist.shape[1] != len(xLabels):
+    pull_hist = numpy.transpose(pull_hist)
+
+    xAxisTitle = data_hist._fXaxis._fTitle.decode('utf8')
+    yAxisTitle = data_hist._fYaxis._fTitle.decode('utf8')
+    plotTitle = histpair.data_name + " Pull Values  |  data:" + str(histpair.data_run) + " & ref:" + str(histpair.ref_run)
+
+    xAxisTitle = xAxisTitle.replace("#circ", "\u00B0").replace("#theta","\u03B8").replace("#phi","\u03C6").replace("#eta","\u03B7")
+    yAxisTitle = yAxisTitle.replace("#circ", "\u00B0").replace("#theta","\u03B8").replace("#phi","\u03C6").replace("#eta","\u03B7")
+    plotTitle = plotTitle.replace("#circ", "\u00B0").replace("#theta","\u03B8").replace("#phi","\u03C6").replace("#eta","\u03B7")
 
     c  = go.Figure(data=go.Heatmap(z=pull_hist, zmin=-pull_cap, zmax=pull_cap, colorscale=colors,x=xLabels, y=yLabels))
     c['layout'].update(plot_bgcolor='white')
-    c.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
-    c.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+    c.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True, showgrid=False)
+    c.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, showgrid=False)
     c.update_layout(
-        title=histpair.data_name + " Pull Values",
-        xaxis_title= data_hist._fXaxis._fTitle.decode('utf8'),
-        yaxis_title= data_hist._fYaxis._fTitle.decode('utf8')
+        title=plotTitle , title_x=0.5,
+        xaxis_title= xAxisTitle,
+        yaxis_title= yAxisTitle,
+        font=dict(
+            family="Times New Roman",
+            size=9,
+            color="black"
+        )
     )
 
     info = {
@@ -190,3 +205,15 @@ def normalize_rows(data_hist_norm, ref_hist_norm):
             data_hist_norm[x, y] = (fbin * sf)
     return data_hist_norm
 
+def projectionXY(tProfile):
+    entries = tProfile._fBinEntries
+    weights = tProfile._fSumw2
+    W = tProfile._fTsumwz
+
+    projectedHist = numpy.zeros((tProfile._fXaxis._fNbins, tProfile._fYaxis._fNbins))
+
+    for x in range(1, tProfile._fXaxis._fNbins+1):
+        for y in range(1, tProfile._fYaxis._fNbins+1):
+            projectedHist[x-1,y-1] = entries[x + y*(tProfile._fXaxis._fNbins+2)]*(weights[x + y*(tProfile._fXaxis._fNbins+2)])/W
+
+    return projectedHist

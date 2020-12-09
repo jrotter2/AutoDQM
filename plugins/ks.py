@@ -44,21 +44,30 @@ def ks(histpair, ks_cut=0.09, min_entries=100000, **kwargs):
     if bins[0] < -999:
         bins[0]=2*bins[1]-bins[2]
 
+    xAxisTitle = data_hist._fXaxis._fTitle.decode('utf8')
+    yAxisTitle = data_hist._fYaxis._fTitle.decode('utf8')
+    plotTitle = histpair.data_name + " KS Test  |  data:" + str(histpair.data_run) + " & ref:" + str(histpair.ref_run)
+
     c = go.Figure()
     c.add_trace(go.Bar(name="data:"+str(histpair.data_run), x=bins, y=data_hist_norm, marker_color='white', marker=dict(line=dict(width=1,color='red'))))
     c.add_trace(go.Bar(name="ref:"+str(histpair.ref_run), x=bins, y=ref_hist_norm, marker_color='rgb(204, 188, 172)', opacity=.9))
     c['layout'].update(bargap=0)
     c['layout'].update(barmode='overlay')
     c['layout'].update(plot_bgcolor='white')
-    c.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
-    c.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True)
+    c.update_xaxes(showline=True, linewidth=2, linecolor='black', mirror=True, showgrid=False)
+    c.update_yaxes(showline=True, linewidth=2, linecolor='black', mirror=True, showgrid=False)
     c.update_layout(
-        title=histpair.data_name + " KS Test " + histpair.data_run + " | " + histpair.ref_run,
-        xaxis_title= data_hist._fXaxis._fTitle.decode('utf8'),
-        yaxis_title= data_hist._fYaxis._fTitle.decode('utf8')
+        title=plotTitle , title_x=0.5,
+        xaxis_title= xAxisTitle,
+        yaxis_title= yAxisTitle,
+        font=dict(
+            family="Times New Roman",
+            size=9,
+            color="black"
+        )
     )
-    data_text = "ref:"+str(histpair.ref_run)
-    ref_text = "data:"+str(histpair.data_run)
+    ref_text = "ref:"+str(histpair.ref_run)
+    data_text = "data:"+str(histpair.data_run)
     artifacts = [data_hist_norm, ref_hist_norm, data_text, ref_text]
 
     info = {
